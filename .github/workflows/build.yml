@@ -33,7 +33,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             v="${GITHUB_REF_NAME#v}"
           else
-            last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -t. -k1,1n -k2,2n | tail -1)
+            last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -t. -k1,1n -k2,2n | tail -1 || true)
             if [ -z "$last" ]; then v="1.0"; else v="${last%%.*}.$(( ${last#*.} + 1 ))"; fi
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
