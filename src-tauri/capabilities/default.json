@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Tab bar (local page only; YouTube pages get no app access)",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
