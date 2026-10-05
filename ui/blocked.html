@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blocked channels</title>
+<style>
+  :root {
+    --bg: #1b1b1f;
+    --field: #26262b;
+    --hover: #303036;
+    --text: #e8e8ea;
+    --muted: #9a9aa2;
+    --accent: #ff6b4a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+  button, input { font: inherit; color: inherit; }
+  input { background: var(--field); border: 1px solid transparent; border-radius: 6px; padding: 6px 8px; outline: none; }
+  input:focus { border-color: var(--accent); }
+
+  #list { flex: 1; margin: 0; padding: 4px; list-style: none; overflow-y: auto; background: var(--field); border-radius: 8px; }
+  #list li { display: flex; align-items: center; gap: 4px; border-radius: 6px; }
+  #list li:hover { background: var(--hover); }
+  #list input { flex: 1; min-width: 0; background: none; }
+  #empty { margin: auto; padding: 24px 0; text-align: center; color: var(--muted); }
+  .remove { width: 26px; height: 26px; flex: none; border: 0; border-radius: 5px; background: none; cursor: pointer;
+    color: var(--muted); display: grid; place-items: center; }
+  .remove:hover { background: #ffffff1f; color: var(--text); }
+  .remove svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+
+  form { display: flex; gap: 8px; }
+  form input { flex: 1; min-width: 0; }
+  #add { padding: 6px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #111; font-weight: 600; cursor: pointer; }
+  #add:disabled { opacity: .4; cursor: default; }
+  p { margin: 0; color: var(--muted); line-height: 1.4; }
+</style>
+</head>
+<body>
+  <ul id="list"></ul>
+  <form id="form">
+    <input id="new" placeholder="@handle or channel link" autocomplete="off" spellcheck="false">
+    <button id="add" disabled>Add</button>
+  </form>
+  <p>Use the Block button under any video, or add channels here. Their videos are hidden from feeds and search, and won't play unless you choose to watch anyway. Edit an entry and press Enter to change it.</p>
+
+<script>
+  const { invoke } = window.__TAURI__.core;
+  const { listen } = window.__TAURI__.event;
+  const $ = id => document.getElementById(id);
+  let channels = [];
+
+  const save = list => invoke('set_blocked', { channels: list }).then(render);
+
+  function render(list) {
+    channels = list;
+    if (!list.length) {
+      const empty = document.createElement('li');
+      empty.id = 'empty';
+      empty.textContent = 'No blocked channels';
+      $('list').replaceChildren(empty);
+      return;
+    }
+    $('list').replaceChildren(...list.map(channel => {
+      const row = document.createElement('li');
+      const name = document.createElement('input');
+      name.value = channel;
+      name.spellcheck = false;
+      // Return saves the edit (an empty entry is dropped); Escape undoes it.
+      name.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save(channels.map(c => c === channel ? name.value : c));
+        if (e.key === 'Escape') name.value = channel;
+      });
+      const remove = document.createElement('button');
+      remove.className = 'remove';
+      remove.title = `Unblock ${channel}`;
+      remove.innerHTML = '<svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg>';
+      remove.addEventListener('click', () => save(channels.filter(c => c !== channel)));
+      row.append(name, remove);
+      return row;
+    }));
+  }
+
+  $('new').addEventListener('input', () => { $('add').disabled = !$('new').value.trim(); });
+  $('form').addEventListener('submit', e => {
+    e.preventDefault();
+    if (!$('new').value.trim()) return;
+    save([...channels, $('new').value]);
+    $('new').value = '';
+    $('add').disabled = true;
+  });
+
+  // Channels blocked from a video while this window is open.
+  listen('blocked', e => render(e.payload));
+  invoke('get_blocked').then(render);
+</script>
+</body>
+</html>

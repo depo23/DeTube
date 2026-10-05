@@ -1,4 +1,4 @@
-// DeTube: YouTube in its own window, with tabs and Shorts / AI-video filters.
+// DeTube: YouTube in its own window, with tabs, Shorts / AI-video filters, a channel blocklist and ad blocking.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Mutex;
@@ -9,26 +9,34 @@ use tauri::webview::NewWindowResponse;
 use tauri::window::WindowBuilder;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Url, WebviewBuilder, WebviewUrl,
-    WindowEvent,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 
 const FILTER_JS: &str = include_str!("filter.js");
+const ADBLOCK_JS: &str = include_str!("adblock.js");
 const HOME: &str = "https://www.youtube.com/";
 /// Height of the tab bar (the local "shell" page drawn above the YouTube tabs).
 const TAB_BAR: f64 = 40.0;
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
     show_shorts: bool,
     #[serde(rename = "showAI")] // the page script's name
     show_ai: bool,
+    /// Blocked channels: "@handle" or "channel/uc…", lowercased as the page script compares them.
+    #[serde(default)]
+    blocked: Vec<String>,
+    /// Bumped on every change. Tabs keep the last values they were sent and compare this
+    /// with the ones injected at tab creation, so a reloaded tab always uses the newer copy.
+    #[serde(default)]
+    rev: u64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { show_shorts: true, show_ai: true }
+        Settings { show_shorts: true, show_ai: true, blocked: Vec::new(), rev: 0 }
     }
 }
 
@@ -68,21 +76,23 @@ fn load_settings(app: &AppHandle) -> Settings {
         .unwrap_or_default()
 }
 
-fn save_settings(app: &AppHandle, settings: Settings) {
+fn save_settings(app: &AppHandle, settings: &Settings) {
     if let Some(path) = settings_path(app) {
         let _ = std::fs::create_dir_all(path.parent().unwrap());
-        let _ = std::fs::write(path, serde_json::to_string(&settings).unwrap());
+        let _ = std::fs::write(path, serde_json::to_string(settings).unwrap());
     }
 }
 
-fn apply_settings(app: &AppHandle, settings: Settings) {
+fn apply_settings(app: &AppHandle, mut settings: Settings) {
     let labels: Vec<String> = {
         let state = app.state::<Shared>();
         let mut state = state.lock().unwrap();
-        state.settings = settings;
+        settings.rev = state.settings.rev + 1;
+        state.settings = settings.clone();
         state.tabs.iter().map(|t| t.label.clone()).collect()
     };
-    save_settings(app, settings);
+    save_settings(app, &settings);
+    let _ = app.emit_to("blocked", "blocked", &settings.blocked);
     let js = format!(
         "window.__mt2 && window.__mt2.update({})",
         serde_json::to_string(&settings).unwrap()
@@ -160,17 +170,19 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
         let state = app.state::<Shared>();
         let mut state = state.lock().unwrap();
         state.next_id += 1;
-        (format!("tab{}", state.next_id), state.settings)
+        (format!("tab{}", state.next_id), state.settings.clone())
     };
     let script = format!(
         "window.__mt2Settings = {};\n{}",
         serde_json::to_string(&settings).unwrap(),
         FILTER_JS
     );
-    let (nav_app, new_app, title_app) = (app.clone(), app.clone(), app.clone());
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(url))
+    let (nav_app, nav_label, new_app, title_app) = (app.clone(), label.clone(), app.clone(), app.clone());
+    // Starts blank: the page is loaded once the ad rules are in place, so the first page is covered too.
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(Url::parse("about:blank").unwrap()))
         .initialization_script(script)
-        .on_navigation(move |url| allow_navigation(&nav_app, url))
+        .initialization_script(ADBLOCK_JS)
+        .on_navigation(move |url| !live_chat::restart_with_safari_agent(&nav_app, &nav_label, url) && allow_navigation(&nav_app, url))
         .on_new_window(move |url, _features| {
             // Creating a tab from inside this callback would block the UI thread.
             let app = new_app.clone();
@@ -178,7 +190,13 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
             NewWindowResponse::Deny
         })
         .on_document_title_changed(move |webview, title| set_title(&title_app, webview.label(), title));
-    window.add_child(builder, LogicalPosition::new(0.0, TAB_BAR), LogicalSize::new(1.0, 1.0))?;
+    #[cfg(target_os = "linux")]
+    let builder = builder.on_page_load(|webview, payload| live_chat::on_page_load(&webview, &payload));
+    let webview = window.add_child(builder, LogicalPosition::new(0.0, TAB_BAR), LogicalSize::new(1.0, 1.0))?;
+    let loader = webview.clone();
+    ad_rules::install(app, &webview, move || {
+        let _ = loader.navigate(url);
+    });
     {
         let state = app.state::<Shared>();
         let mut state = state.lock().unwrap();
@@ -309,6 +327,13 @@ fn handle_new_window(app: &AppHandle, url: Url) {
             "/close" => close_tab(app, &active_label(app)),
             "/next" => cycle_tab(app, 1),
             "/prev" => cycle_tab(app, -1),
+            "/block" => {
+                if let Some((_, channel)) = url.query_pairs().find(|(k, _)| k == "c") {
+                    let mut blocked = app.state::<Shared>().lock().unwrap().settings.blocked.clone();
+                    blocked.push(channel.into_owned());
+                    set_blocklist(app, blocked);
+                }
+            }
             _ => {}
         }
         return;
@@ -387,7 +412,7 @@ async fn open_external(app: AppHandle, url: String) {
 /// Native settings menu under the ⚙ button.
 #[tauri::command]
 async fn show_menu(app: AppHandle) -> Result<(), String> {
-    let settings = app.state::<Shared>().lock().unwrap().settings;
+    let settings = app.state::<Shared>().lock().unwrap().settings.clone();
     let version = app.package_info().version.to_string();
     let build = || -> tauri::Result<Menu<tauri::Wry>> {
         Menu::with_items(
@@ -397,6 +422,7 @@ async fn show_menu(app: AppHandle) -> Result<(), String> {
                 &CheckMenuItem::with_id(&app, "ai", "Show AI videos", true, settings.show_ai, None::<&str>)?,
                 &PredefinedMenuItem::separator(&app)?,
                 &MenuItem::with_id(&app, "forget", "Forget learned AI channels", true, None::<&str>)?,
+                &MenuItem::with_id(&app, "blocked", "Blocked channels…", true, None::<&str>)?,
                 &PredefinedMenuItem::separator(&app)?,
                 &MenuItem::with_id(&app, "updates", "Check for updates…", true, None::<&str>)?,
                 &MenuItem::with_id(&app, "about", format!("DeTube {version}"), false, None::<&str>)?,
@@ -410,7 +436,7 @@ async fn show_menu(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn toggle_setting(app: AppHandle, key: String) {
-    let mut settings = app.state::<Shared>().lock().unwrap().settings;
+    let mut settings = app.state::<Shared>().lock().unwrap().settings.clone();
     match key.as_str() {
         "shorts" => settings.show_shorts = !settings.show_shorts,
         "ai" => settings.show_ai = !settings.show_ai,
@@ -423,6 +449,280 @@ fn forget_channels(app: &AppHandle) {
     // Learned channels live in YouTube's storage, shared by all tabs; any tab can clear them.
     if let Some(webview) = app.get_webview(&active_label(app)) {
         let _ = webview.eval("window.__mt2 && window.__mt2.forgetChannels()");
+    }
+}
+
+// ---------------------------------------------------------------- channel blocklist
+
+/// Accepts what people paste: "Name", "@Name", "youtube.com/@Name/videos", "…/channel/UC…".
+fn normalize_channel(input: &str) -> String {
+    let decoded = percent_encoding::percent_decode_str(input.trim()).decode_utf8_lossy().to_lowercase();
+    let rest = decoded.find("youtube.com/").map_or(&decoded[..], |i| &decoded[i + "youtube.com/".len()..]);
+    let mut parts = rest.split(['/', '?', '#']).filter(|p| !p.is_empty());
+    match parts.next() {
+        None => String::new(),
+        Some("channel") => parts.next().map(|id| format!("channel/{id}")).unwrap_or_default(),
+        Some(first) if first.starts_with('@') => first.to_string(),
+        Some(first) => format!("@{first}"),
+    }
+}
+
+/// Saves the list (normalized, without blanks or duplicates) and pushes it to every tab.
+/// Normalized, without blanks or duplicates, in the order given.
+fn clean_blocklist(channels: &[String]) -> Vec<String> {
+    let mut clean: Vec<String> = Vec::new();
+    for channel in channels.iter().map(|c| normalize_channel(c)) {
+        if !channel.is_empty() && !clean.contains(&channel) {
+            clean.push(channel);
+        }
+    }
+    clean
+}
+
+fn set_blocklist(app: &AppHandle, channels: Vec<String>) -> Vec<String> {
+    let clean = clean_blocklist(&channels);
+    let mut settings = app.state::<Shared>().lock().unwrap().settings.clone();
+    settings.blocked = clean.clone();
+    apply_settings(app, settings);
+    clean
+}
+
+#[tauri::command]
+async fn get_blocked(app: AppHandle) -> Vec<String> {
+    app.state::<Shared>().lock().unwrap().settings.blocked.clone()
+}
+
+#[tauri::command]
+async fn set_blocked(app: AppHandle, channels: Vec<String>) -> Vec<String> {
+    set_blocklist(&app, channels)
+}
+
+/// The editor for the blocklist, in its own small window.
+fn show_blocked_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("blocked") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "blocked", WebviewUrl::App("blocked.html".into()))
+        .title("Blocked channels")
+        .inner_size(420.0, 460.0)
+        .min_inner_size(340.0, 320.0)
+        .build();
+}
+
+// ---------------------------------------------------------------- ad blocking (network)
+
+/// Ad servers and YouTube's ad endpoints, blocked before they load. The page script
+/// (adblock.js) handles the rest: ads stripped from the player's data, a skipper for any
+/// that still play, and hidden ad slots.
+mod ad_rules {
+    #[cfg(any(windows, target_os = "linux"))]
+    const HOSTS: [&str; 4] = ["doubleclick.net", "googlesyndication.com", "googleadservices.com", "imasdk.googleapis.com"];
+    #[cfg(any(windows, target_os = "linux"))]
+    const YOUTUBE_PATHS: [&str; 4] = ["pagead/", "api/stats/ads", "ptracking", "get_midroll_info"];
+
+    /// Adds the rules to a new tab, then calls `then` (also if they couldn't be added).
+    #[cfg(not(any(windows, target_os = "linux")))]
+    pub fn install(_app: &tauri::AppHandle, _webview: &tauri::Webview, then: impl FnOnce() + Send + 'static) {
+        then();
+    }
+
+    #[cfg(windows)]
+    fn is_ad(uri: &str) -> bool {
+        let Ok(url) = tauri::Url::parse(uri) else { return false };
+        let Some(host) = url.host_str() else { return false };
+        let on = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
+        HOSTS.iter().any(|h| on(h)) || (on("youtube.com") && YOUTUBE_PATHS.iter().any(|p| url.path().trim_start_matches('/').starts_with(p)))
+    }
+
+    /// WebView2: answer matching requests with a 403 instead of sending them.
+    #[cfg(windows)]
+    pub fn install(_app: &tauri::AppHandle, webview: &tauri::Webview, then: impl FnOnce() + Send + 'static) {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2_22, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+        };
+        use webview2_com::{take_pwstr, WebResourceRequestedEventHandler};
+        use windows_core::{Interface, HSTRING, PWSTR};
+
+        let result = webview.with_webview(move |platform| unsafe {
+            if let Ok(core) = platform.controller().CoreWebView2() {
+                let env = platform.environment();
+                let patterns = HOSTS.iter().map(|h| format!("*{h}/*")).chain(YOUTUBE_PATHS.iter().map(|p| format!("*youtube.com/{p}*")));
+                for pattern in patterns {
+                    let filter = HSTRING::from(pattern);
+                    // Version 22+ also reports requests made by iframes.
+                    let _ = match core.cast::<ICoreWebView2_22>() {
+                        Ok(core22) => core22.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                            &filter,
+                            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                            COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+                        ),
+                        Err(_) => core.AddWebResourceRequestedFilter(&filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL),
+                    };
+                }
+                // Every handler sees every filtered request (Tauri's own included), so check the URL here.
+                let handler = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let mut uri = PWSTR::null();
+                    args.Request()?.Uri(&mut uri)?;
+                    if is_ad(&take_pwstr(uri)) {
+                        args.SetResponse(&env.CreateWebResourceResponse(None, 403, &HSTRING::from("Blocked"), &HSTRING::new())?)?;
+                    }
+                    Ok(())
+                }));
+                let mut token = 0;
+                let _ = core.add_WebResourceRequested(&handler, &mut token);
+            }
+            then();
+        });
+        if let Err(e) = result {
+            eprintln!("DeTube: ad rules not installed: {e}");
+        }
+    }
+
+    /// WebKitGTK content blocker rules, the same format as Safari's. WebKit's rule syntax has no "|", hence one rule each.
+    #[cfg(target_os = "linux")]
+    fn rules() -> String {
+        let filters = HOSTS
+            .iter()
+            .map(|h| format!("^[^:]+://+([^:/]+\\.)?{}[:/]", h.replace('.', "\\.")))
+            .chain(YOUTUBE_PATHS.iter().map(|p| format!("^[^:]+://+([^:/]+\\.)?youtube\\.com/{p}")));
+        let list: Vec<_> = filters
+            .map(|f| serde_json::json!({ "trigger": { "url-filter": f }, "action": { "type": "block" } }))
+            .collect();
+        serde_json::to_string(&list).unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    thread_local! {
+        /// Compiled once per launch, on the GTK thread.
+        static COMPILED: std::cell::Cell<*mut webkit2gtk::ffi::WebKitUserContentFilter> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn install(app: &tauri::AppHandle, webview: &tauri::Webview, then: impl FnOnce() + Send + 'static) {
+        use tauri::Manager;
+        use webkit2gtk::glib::translate::ToGlibPtr;
+        use webkit2gtk::{ffi, gio, glib, WebViewExt};
+
+        type Done = Box<dyn FnOnce(*mut ffi::WebKitUserContentFilter)>;
+        unsafe extern "C" fn saved(store: *mut glib::gobject_ffi::GObject, result: *mut gio::ffi::GAsyncResult, data: glib::ffi::gpointer) {
+            let done = Box::from_raw(data as *mut Done);
+            let mut error = std::ptr::null_mut();
+            let filter = ffi::webkit_user_content_filter_store_save_finish(store as _, result, &mut error);
+            if !error.is_null() {
+                eprintln!("DeTube: ad rules failed to compile: {}", std::ffi::CStr::from_ptr((*error).message).to_string_lossy());
+                glib::ffi::g_error_free(error);
+            }
+            glib::gobject_ffi::g_object_unref(store);
+            done(filter);
+        }
+
+        let store_dir = app.path().app_cache_dir().ok().map(|d| d.join("content-filters"));
+        let result = webview.with_webview(move |platform| unsafe {
+            let Some(manager) = platform.inner().user_content_manager() else { return then() };
+            let cached = COMPILED.get();
+            if !cached.is_null() {
+                ffi::webkit_user_content_manager_add_filter(manager.to_glib_none().0, cached);
+                return then();
+            }
+            let Some(dir) = store_dir.and_then(|d| std::ffi::CString::new(d.to_string_lossy().as_bytes()).ok()) else { return then() };
+            let done: Done = Box::new(move |filter| {
+                if !filter.is_null() {
+                    ffi::webkit_user_content_manager_add_filter(manager.to_glib_none().0, filter);
+                    if COMPILED.get().is_null() {
+                        COMPILED.set(filter); // kept for the rest of the launch
+                    } else {
+                        ffi::webkit_user_content_filter_unref(filter);
+                    }
+                }
+                then();
+            });
+            let store = ffi::webkit_user_content_filter_store_new(dir.as_ptr());
+            let source = glib::Bytes::from_owned(rules());
+            ffi::webkit_user_content_filter_store_save(
+                store,
+                c"detube-ads".as_ptr(),
+                source.to_glib_none().0,
+                std::ptr::null_mut(),
+                Some(saved),
+                Box::into_raw(Box::new(done)) as glib::ffi::gpointer,
+            );
+        });
+        if let Err(e) = result {
+            eprintln!("DeTube: ad rules not installed: {e}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------- live chat
+
+/// WebKitGTK's own user agent gets "your browser is out of date" from YouTube's live chat.
+/// Only live chat gets Safari's: with it everywhere, YouTube also serves the full set of ads.
+/// (WebView2 identifies as Edge, which live chat accepts as is.)
+mod live_chat {
+    use tauri::{AppHandle, Url};
+
+    #[cfg(target_os = "linux")]
+    const SAFARI: &str =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+
+    /// Tabs currently using Safari's user agent.
+    #[cfg(target_os = "linux")]
+    static SAFARI_TABS: std::sync::Mutex<std::collections::BTreeSet<String>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+    #[cfg(target_os = "linux")]
+    fn is_live_chat(url: &Url) -> bool {
+        url.host_str().is_some_and(|h| h == "youtube.com" || h.ends_with(".youtube.com")) && url.path().starts_with("/live_chat")
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_user_agent(webview: &tauri::Webview, agent: Option<&'static str>) {
+        let _ = webview.with_webview(move |platform| {
+            use webkit2gtk::{SettingsExt, WebViewExt};
+            if let Some(settings) = WebViewExt::settings(&platform.inner()) {
+                settings.set_user_agent(agent); // None: WebKit's default
+            }
+        });
+    }
+
+    /// Live chat (embedded or popped out) about to load with the default agent: cancel it (returns true),
+    /// switch the tab to Safari's and load it again — the agent can't change for a load already under way.
+    #[cfg(target_os = "linux")]
+    pub fn restart_with_safari_agent(app: &AppHandle, label: &str, url: &Url) -> bool {
+        if !is_live_chat(url) || !SAFARI_TABS.lock().unwrap().insert(label.to_string()) {
+            return false;
+        }
+        let (app, label, url) = (app.clone(), label.to_string(), url.to_string());
+        // Not from inside the navigation callback.
+        tauri::async_runtime::spawn(async move {
+            let Some(webview) = tauri::Manager::get_webview(&app, &label) else { return };
+            set_user_agent(&webview, Some(SAFARI));
+            let url = serde_json::to_string(&url).unwrap();
+            let _ = webview.eval(format!(
+                "(u => {{ const frames = [...document.querySelectorAll('iframe')].filter(f => f.src === u); \
+                 if (frames.length) frames.forEach(f => f.src = u); else location.href = u; }})({url})"
+            ));
+        });
+        true
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn restart_with_safari_agent(_app: &AppHandle, _label: &str, _url: &Url) -> bool {
+        false
+    }
+
+    /// Back to the default agent on the next full page load that isn't live chat.
+    #[cfg(target_os = "linux")]
+    pub fn on_page_load(webview: &tauri::Webview, payload: &tauri::webview::PageLoadPayload<'_>) {
+        if payload.event() == tauri::webview::PageLoadEvent::Started
+            && !is_live_chat(payload.url())
+            && SAFARI_TABS.lock().unwrap().remove(webview.label())
+        {
+            set_user_agent(webview, None);
+        }
     }
 }
 
@@ -449,7 +749,9 @@ fn main() {
             set_bar_height,
             open_external,
             show_menu,
-            toggle_setting
+            toggle_setting,
+            get_blocked,
+            set_blocked
         ])
         .on_menu_event(|app, event| {
             let app = app.clone();
@@ -458,6 +760,7 @@ fn main() {
                 match id.as_str() {
                     "shorts" | "ai" => toggle_setting(app, id).await,
                     "forget" => forget_channels(&app),
+                    "blocked" => show_blocked_window(&app),
                     "updates" => {
                         let _ = app.emit_to("shell", "check-updates", ());
                     }
@@ -491,4 +794,33 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running DeTube");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_pasted_channels() {
+        assert_eq!(normalize_channel("SomeName"), "@somename");
+        assert_eq!(normalize_channel("  @SomeName "), "@somename");
+        assert_eq!(normalize_channel("https://www.youtube.com/@SomeName/videos"), "@somename");
+        assert_eq!(normalize_channel("youtube.com/@SomeName?si=abc"), "@somename");
+        assert_eq!(normalize_channel("https://www.youtube.com/channel/UCabc123/featured"), "channel/ucabc123");
+        assert_eq!(normalize_channel("@Caf%C3%A9Tube"), "@caf\u{e9}tube");
+        assert_eq!(normalize_channel("https://www.youtube.com/channel/"), "");
+        assert_eq!(normalize_channel("   "), "");
+    }
+
+    #[test]
+    fn cleans_blocklist() {
+        let input = ["@A", "a", "", "youtube.com/@B/videos", "@b"].map(String::from);
+        assert_eq!(clean_blocklist(&input), vec!["@a", "@b"]);
+    }
+
+    #[test]
+    fn old_settings_files_still_load() {
+        let old: Settings = serde_json::from_str(r#"{"showShorts":false,"showAI":true}"#).unwrap();
+        assert!(!old.show_shorts && old.blocked.is_empty() && old.rev == 0);
+    }
 }

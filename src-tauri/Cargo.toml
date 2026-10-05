@@ -13,6 +13,7 @@ tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+percent-encoding = "2"
 
 [profile.release]
 codegen-units = 1
@@ -20,6 +21,12 @@ lto = true
 opt-level = "s"
 strip = true
 
-# Linux: pin the tab bar's height (see fit_shell in main.rs).
+# Linux: pin the tab bar's height (see fit_shell in main.rs); ad rules and live chat's user agent.
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+webkit2gtk = { version = "2.0", features = ["v2_40"] }
+
+# Windows: ad rules (see ad_rules in main.rs).
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"

@@ -724,11 +724,15 @@ name = "detube"
 version = "0.0.0"
 dependencies = [
  "gtk",
+ "percent-encoding",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "webkit2gtk",
+ "webview2-com",
+ "windows-core",
 ]
 
 [[package]]
