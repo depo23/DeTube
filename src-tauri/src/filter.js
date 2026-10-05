@@ -25,11 +25,14 @@
   const KEY = 'mt2.aiChannels';
 
   const root = document.documentElement;
-  // Settings: the app injects its current values; the last values pushed with update()
-  // are also kept in this site's storage so reloaded tabs pick them up.
-  const SETTINGS_KEY = 'wt.settings';
-  let settings = Object.assign({ showShorts: true, showAI: true, blocked: [] }, window.__mt2Settings, readSettings());
+  // Settings come from the app: injected when the tab opened, then pushed with update(). The last
+  // pushed values are also kept in this site's storage so a reloaded tab doesn't fall back to the
+  // ones injected at tab creation; "rev" says which copy is newer.
+  const SETTINGS_KEY = 'detube.settings';
   function readSettings() { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) { return {}; } }
+  const injected = window.__mt2Settings || {}, stored = readSettings();
+  let settings = Object.assign({ showShorts: true, showAI: true, blocked: [], rev: 0 },
+                               (stored.rev || 0) > (injected.rev || 0) ? stored : injected);
   let blocked = new Set(settings.blocked);
   let aiChannels = new Set(load());
   const results = new Map(); // videoId -> Promise<{ ai, channel }>
@@ -60,7 +63,7 @@
     #mt2-block-channel svg { width: 22px; height: 22px; fill: currentColor; }
     #mt2-block { position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column;
       align-items: center; justify-content: center; gap: 20px; background: rgba(15,15,15,.97);
-      color: #fff; font: 16px -apple-system, BlinkMacSystemFont, sans-serif; }
+      color: #fff; font: 16px "Segoe UI", system-ui, -apple-system, sans-serif; }
     #mt2-block p { margin: 0; }
     #mt2-block div { display: flex; gap: 12px; }
     #mt2-block button { font: inherit; padding: 8px 18px; border: 0; border-radius: 18px; cursor: pointer;

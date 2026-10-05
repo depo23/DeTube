@@ -28,11 +28,15 @@ struct Settings {
     /// Blocked channels: "@handle" or "channel/uc…", lowercased as the page script compares them.
     #[serde(default)]
     blocked: Vec<String>,
+    /// Bumped on every change. Tabs keep the last values they were sent and compare this
+    /// with the ones injected at tab creation, so a reloaded tab always uses the newer copy.
+    #[serde(default)]
+    rev: u64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { show_shorts: true, show_ai: true, blocked: Vec::new() }
+        Settings { show_shorts: true, show_ai: true, blocked: Vec::new(), rev: 0 }
     }
 }
 
@@ -79,10 +83,11 @@ fn save_settings(app: &AppHandle, settings: &Settings) {
     }
 }
 
-fn apply_settings(app: &AppHandle, settings: Settings) {
+fn apply_settings(app: &AppHandle, mut settings: Settings) {
     let labels: Vec<String> = {
         let state = app.state::<Shared>();
         let mut state = state.lock().unwrap();
+        settings.rev = state.settings.rev + 1;
         state.settings = settings.clone();
         state.tabs.iter().map(|t| t.label.clone()).collect()
     };
@@ -463,13 +468,19 @@ fn normalize_channel(input: &str) -> String {
 }
 
 /// Saves the list (normalized, without blanks or duplicates) and pushes it to every tab.
-fn set_blocklist(app: &AppHandle, channels: Vec<String>) -> Vec<String> {
+/// Normalized, without blanks or duplicates, in the order given.
+fn clean_blocklist(channels: &[String]) -> Vec<String> {
     let mut clean: Vec<String> = Vec::new();
     for channel in channels.iter().map(|c| normalize_channel(c)) {
         if !channel.is_empty() && !clean.contains(&channel) {
             clean.push(channel);
         }
     }
+    clean
+}
+
+fn set_blocklist(app: &AppHandle, channels: Vec<String>) -> Vec<String> {
+    let clean = clean_blocklist(&channels);
     let mut settings = app.state::<Shared>().lock().unwrap().settings.clone();
     settings.blocked = clean.clone();
     apply_settings(app, settings);
@@ -783,4 +794,33 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running DeTube");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_pasted_channels() {
+        assert_eq!(normalize_channel("SomeName"), "@somename");
+        assert_eq!(normalize_channel("  @SomeName "), "@somename");
+        assert_eq!(normalize_channel("https://www.youtube.com/@SomeName/videos"), "@somename");
+        assert_eq!(normalize_channel("youtube.com/@SomeName?si=abc"), "@somename");
+        assert_eq!(normalize_channel("https://www.youtube.com/channel/UCabc123/featured"), "channel/ucabc123");
+        assert_eq!(normalize_channel("@Caf%C3%A9Tube"), "@caf\u{e9}tube");
+        assert_eq!(normalize_channel("https://www.youtube.com/channel/"), "");
+        assert_eq!(normalize_channel("   "), "");
+    }
+
+    #[test]
+    fn cleans_blocklist() {
+        let input = ["@A", "a", "", "youtube.com/@B/videos", "@b"].map(String::from);
+        assert_eq!(clean_blocklist(&input), vec!["@a", "@b"]);
+    }
+
+    #[test]
+    fn old_settings_files_still_load() {
+        let old: Settings = serde_json::from_str(r#"{"showShorts":false,"showAI":true}"#).unwrap();
+        assert!(!old.show_shorts && old.blocked.is_empty() && old.rev == 0);
+    }
 }
