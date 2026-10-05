@@ -26,6 +26,9 @@
 
 - **Shorts off, for good.** One switch removes Shorts from your home feed, search, sidebar and recommendations. Shorts links take you back Home.
 - **Skip AI-generated videos.** Videos YouTube labels *Made with AI* are stopped before they play. Channels caught posting them disappear from your feed too, so it gets cleaner the more you watch. One click to watch anyway.
+- **No ads.** Video ads are removed before the player sees them, any that slip through are muted and skipped, and promoted videos and ad banners are hidden from your feed, search and watch pages.
+- **Live chat replay: fully working 😉** Live streams and past streams load their chat alongside the video, with no "your browser is out of date" message.
+- **Block channels.** Press **Block** under any video and that channel is gone: its videos vanish from your feed and search, and won't play unless you choose to. Edit the list anytime in **⚙ → Blocked channels…**.
 - **Tabs.** Ctrl+T for a new tab, Ctrl+click a video to open it in one. Closing a tab stops its sound.
 - **Links go where they should.** Links in descriptions and comments open in your default browser.
 - **Always current.** A banner tells you when a new version is out.
@@ -36,6 +39,8 @@
 | --- | --- | --- |
 | Show / hide Shorts | ⚙ menu | |
 | Show / hide AI videos | ⚙ menu | |
+| Block a channel | **Block** button under any video | |
+| Edit blocked channels | ⚙ → **Blocked channels…** | |
 | New tab | **+** button | Ctrl+T |
 | Close tab | **×** on the tab, or middle-click it | Ctrl+W |
 | Next / previous tab | | Ctrl+Tab / Ctrl+Shift+Tab |
