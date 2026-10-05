@@ -1,22 +1,26 @@
 <p align="center">
-  <img src="icon.png" width="160" alt="WinTube icon">
+  <img src="icon.png" width="160" alt="DeTube icon">
 </p>
 
-<h1 align="center">WinTube</h1>
+<h1 align="center">DeTube</h1>
 
 <p align="center">
-  YouTube as a real Windows app — without Shorts, without AI slop, without a browser full of tabs.
+  YouTube as a real desktop app — without Shorts, without AI slop, without a browser full of tabs.
 </p>
 
 <p align="center">
-  <a href="https://github.com/depo23/WinTube/releases/latest/download/WinTube-Setup.exe"><img src="https://img.shields.io/badge/Download-WinTube%20for%20Windows-black?style=for-the-badge&logo=windows" alt="Download WinTube"></a>
+  <a href="https://github.com/depo23/DeTube/releases/latest/download/DeTube-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download-black?style=for-the-badge&logo=windows" alt="Download for Windows"></a>
+  &nbsp;
+  <a href="https://github.com/depo23/DeTube/releases/latest/download/DeTube-x86_64.AppImage"><img src="https://img.shields.io/badge/Linux-AppImage-black?style=for-the-badge&logo=linux" alt="Download AppImage for Linux"></a>
 </p>
 
-<p align="center"><sub>Windows 10 or 11 · always the latest build</sub></p>
+<p align="center"><sub>
+  Windows 10 / 11 · Linux x86_64 (also as <a href="https://github.com/depo23/DeTube/releases/latest/download/DeTube-amd64.deb">.deb</a> and <a href="https://github.com/depo23/DeTube/releases/latest/download/DeTube-x86_64.rpm">.rpm</a>) · always the latest build · on a Mac? See <a href="https://github.com/depo23/MacTube2">MacTube 2</a>
+</sub></p>
 
 ---
 
-## Why WinTube
+## Why DeTube
 
 **Watch what you chose, not what the algorithm pushes.**
 
@@ -30,8 +34,8 @@
 
 | | Where | Shortcut |
 | --- | --- | --- |
-| Show / hide Shorts | ⚙ menu | — |
-| Show / hide AI videos | ⚙ menu | — |
+| Show / hide Shorts | ⚙ menu | |
+| Show / hide AI videos | ⚙ menu | |
 | New tab | **+** button | Ctrl+T |
 | Close tab | **×** on the tab, or middle-click it | Ctrl+W |
 | Next / previous tab | | Ctrl+Tab / Ctrl+Shift+Tab |
@@ -39,8 +43,15 @@
 
 ## Install
 
-1. [Download WinTube-Setup.exe](https://github.com/depo23/WinTube/releases/latest/download/WinTube-Setup.exe) and run it.
-2. If Windows shows *"Windows protected your PC"*, click **More info → Run anyway**. (WinTube isn't signed with a paid certificate, so Windows asks once.)
+**Windows** — [download DeTube-Setup.exe](https://github.com/depo23/DeTube/releases/latest/download/DeTube-Setup.exe) and run it. If Windows shows *"Windows protected your PC"*, click **More info → Run anyway** (DeTube isn't signed with a paid certificate, so Windows asks once).
+
+**Linux** — pick one:
+
+- **AppImage** (any distribution): download [DeTube-x86_64.AppImage](https://github.com/depo23/DeTube/releases/latest/download/DeTube-x86_64.AppImage), then `chmod +x DeTube-x86_64.AppImage` and run it. On NixOS: `appimage-run DeTube-x86_64.AppImage`.
+- **Ubuntu / Debian / Mint:** `sudo apt install ./DeTube-amd64.deb` ([download](https://github.com/depo23/DeTube/releases/latest/download/DeTube-amd64.deb))
+- **Fedora / openSUSE:** `sudo dnf install ./DeTube-x86_64.rpm` ([download](https://github.com/depo23/DeTube/releases/latest/download/DeTube-x86_64.rpm))
+
+If videos don't play on Linux, install your distribution's GStreamer codecs (on Ubuntu: `sudo apt install gstreamer1.0-plugins-bad gstreamer1.0-libav`). The AppImage already includes them.
 
 ## Good to know
 
@@ -49,8 +60,8 @@
 
 ## Build it yourself
 
-Every push to `main` builds a new release automatically. To build locally you need [Rust](https://rustup.rs) and Node.js: `npx @tauri-apps/cli@2 build`.
+Every push to `main` builds Windows and Linux releases automatically. To build locally you need [Rust](https://rustup.rs) and Node.js (plus the [Tauri Linux packages](https://v2.tauri.app/start/prerequisites/#linux) on Linux): `npx @tauri-apps/cli@2 build`.
 
 ---
 
-<sub>Windows sibling of [MacTube 2](https://github.com/depo23/MacTube2). Not affiliated with YouTube or Google.</sub>
+<sub>Sibling of [MacTube 2](https://github.com/depo23/MacTube2). Not affiliated with YouTube or Google.</sub>

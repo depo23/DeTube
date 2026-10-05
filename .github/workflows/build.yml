@@ -1,4 +1,4 @@
-name: Build Windows installer
+name: Build Windows & Linux
 
 on:
   push:
@@ -16,11 +16,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,10 +38,34 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "Version $v"
 
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+          - os: ubuntu-22.04  # older glibc, so the AppImage runs on more distributions
+            bundles: appimage,deb,rpm
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Stamp version
         run: |
-          jq --arg v "${{ steps.version.outputs.version }}.0" '.version = $v' src-tauri/tauri.conf.json > conf.tmp
+          jq --arg v "${{ needs.version.outputs.version }}.0" '.version = $v' src-tauri/tauri.conf.json > conf.tmp
           mv conf.tmp src-tauri/tauri.conf.json
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -50,25 +73,44 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Build installer
-        run: npx --yes @tauri-apps/cli@^2 build
+      - name: Build
+        run: npx --yes @tauri-apps/cli@^2 build --bundles ${{ matrix.bundles }}
 
-      - name: Collect installer
-        run: cp src-tauri/target/release/bundle/nsis/*-setup.exe WinTube-Setup.exe
+      # Stable file names, so the README's "latest" links never change.
+      - name: Collect
+        run: |
+          mkdir dist
+          b=src-tauri/target/release/bundle
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp $b/nsis/*-setup.exe dist/DeTube-Setup.exe
+          else
+            cp $b/appimage/*.AppImage dist/DeTube-x86_64.AppImage
+            cp $b/deb/*.deb dist/DeTube-amd64.deb
+            cp $b/rpm/*.rpm dist/DeTube-x86_64.rpm
+          fi
+          ls -la dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WinTube-Setup
-          path: WinTube-Setup.exe
+          name: DeTube-${{ runner.os }}
+          path: dist/*
 
-      # Every push to main becomes the "latest" release, so the README link always gets the newest build.
-      - name: Publish release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+  # Every push to main becomes the "latest" release with all installers attached.
+  release:
+    needs: [version, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: WinTube v${{ steps.version.outputs.version }}
-          body: Version ${{ steps.version.outputs.version }}
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: DeTube v${{ needs.version.outputs.version }}
+          body: Version ${{ needs.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: WinTube-Setup.exe
+          files: dist/*

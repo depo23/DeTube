@@ -96,7 +96,7 @@
     const box = document.createElement('div');
     box.id = 'mt2-block';
     const msg = document.createElement('p');
-    msg.textContent = 'Hidden by WinTube — YouTube labels this video as made with AI.';
+    msg.textContent = 'Hidden by DeTube — YouTube labels this video as made with AI.';
     const actions = document.createElement('div');
     actions.append(
       button(isShort ? 'Next Short' : 'Go back', () => {
@@ -168,7 +168,7 @@
   applyAttrs();
 
   // Tab shortcuts while YouTube has focus. The app intercepts these window.open calls
-  // (wintube.invalid is never loaded) and acts on them.
+  // (detube.invalid is never loaded) and acts on them.
   document.addEventListener('keydown', e => {
     if (!e.ctrlKey || e.altKey || e.metaKey) return;
     const key = e.key.toLowerCase();
@@ -179,6 +179,6 @@
     if (!cmd) return;
     e.preventDefault();
     e.stopPropagation();
-    window.open('https://wintube.invalid/' + cmd);
+    window.open('https://detube.invalid/' + cmd);
   }, true);
 })();

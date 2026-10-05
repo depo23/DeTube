@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>WinTube</title>
+<title>DeTube</title>
 <style>
   :root {
     --bg: #1b1b1f;
@@ -64,7 +64,7 @@
   const { invoke } = window.__TAURI__.core;
   const { listen } = window.__TAURI__.event;
   const { getVersion } = window.__TAURI__.app;
-  const REPO = 'depo23/WinTube';
+  const REPO = 'depo23/DeTube';
   const BAR = 40, BANNER = 36;
   const $ = id => document.getElementById(id);
 
@@ -129,13 +129,14 @@
       const release = await res.json();
       const latest = (release.tag_name || '').replace(/^v/, '');
       if (/^\d+(\.\d+)+$/.test(latest) && isNewer(latest, current)) {
-        const exe = (release.assets || []).find(a => a.name.endsWith('.exe'));
+        // Windows gets the installer directly; on Linux the release page lets people pick AppImage, .deb or .rpm.
+        const exe = navigator.userAgent.includes('Windows') && (release.assets || []).find(a => a.name.endsWith('.exe'));
         downloadUrl = exe ? exe.browser_download_url : release.html_url;
-        $('banner-text').textContent = `WinTube ${latest} is available.`;
+        $('banner-text').textContent = `DeTube ${latest} is available.`;
         $('banner').classList.add('show');
         invoke('set_bar_height', { height: BAR + BANNER });
       } else if (manual) {
-        alert(`WinTube ${current} is up to date.`);
+        alert(`DeTube ${current} is up to date.`);
       }
     } catch (e) {
       if (manual) alert("Couldn't check for updates. Check your connection and try again.");

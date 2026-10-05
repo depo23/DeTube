@@ -1,4 +1,4 @@
-// WinTube: YouTube in its own window, with tabs and Shorts / AI-video filters.
+// DeTube: YouTube in its own window, with tabs and Shorts / AI-video filters.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Mutex;
@@ -22,6 +22,7 @@ const TAB_BAR: f64 = 40.0;
 #[serde(rename_all = "camelCase")]
 struct Settings {
     show_shorts: bool,
+    #[serde(rename = "showAI")] // the page script's name
     show_ai: bool,
 }
 
@@ -94,6 +95,24 @@ fn apply_settings(app: &AppHandle, settings: Settings) {
 }
 
 // ---------------------------------------------------------------- layout & tabs
+
+/// On Linux, child web views are stacked in the window's vertical box and ignore
+/// set_bounds, so the shell is pinned to its height there and the visible tab expands.
+#[cfg(target_os = "linux")]
+fn fit_shell(app: &AppHandle, height: f64) {
+    use gtk::prelude::*;
+    let Some(shell) = app.get_webview("shell") else { return };
+    let _ = shell.with_webview(move |platform| {
+        let widget = platform.inner().upcast::<gtk::Widget>();
+        widget.set_size_request(-1, height as i32);
+        if let Some(parent) = widget.parent().and_then(|p| p.downcast::<gtk::Box>().ok()) {
+            parent.set_child_packing(&widget, false, true, 0, gtk::PackType::Start);
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn fit_shell(_app: &AppHandle, _height: f64) {}
 
 /// Shell across the top; the active tab fills the rest; other tabs are hidden.
 fn layout(app: &AppHandle) {
@@ -280,9 +299,9 @@ fn allow_navigation(app: &AppHandle, url: &Url) -> bool {
 }
 
 /// New-window requests: target="_blank" / Ctrl+click links, and the tab shortcuts
-/// sent by the page script as wintube.invalid/<command>.
+/// sent by the page script as detube.invalid/<command>.
 fn handle_new_window(app: &AppHandle, url: Url) {
-    if url.host_str() == Some("wintube.invalid") {
+    if url.host_str() == Some("detube.invalid") {
         match url.path() {
             "/newtab" => {
                 let _ = open_tab(app, Url::parse(HOME).unwrap());
@@ -352,7 +371,9 @@ async fn nav(app: AppHandle, action: String) {
 /// The shell grows when the update banner is shown.
 #[tauri::command]
 async fn set_bar_height(app: AppHandle, height: f64) {
-    app.state::<Shared>().lock().unwrap().bar = height.max(TAB_BAR);
+    let height = height.max(TAB_BAR);
+    app.state::<Shared>().lock().unwrap().bar = height;
+    fit_shell(&app, height);
     layout(&app);
 }
 
@@ -372,13 +393,13 @@ async fn show_menu(app: AppHandle) -> Result<(), String> {
         Menu::with_items(
             &app,
             &[
-                &CheckMenuItem::with_id(&app, "shorts", "Show Shorts", true, settings.show_shorts, Some("Ctrl+Shift+1"))?,
-                &CheckMenuItem::with_id(&app, "ai", "Show AI videos", true, settings.show_ai, Some("Ctrl+Shift+2"))?,
+                &CheckMenuItem::with_id(&app, "shorts", "Show Shorts", true, settings.show_shorts, None::<&str>)?,
+                &CheckMenuItem::with_id(&app, "ai", "Show AI videos", true, settings.show_ai, None::<&str>)?,
                 &PredefinedMenuItem::separator(&app)?,
                 &MenuItem::with_id(&app, "forget", "Forget learned AI channels", true, None::<&str>)?,
                 &PredefinedMenuItem::separator(&app)?,
                 &MenuItem::with_id(&app, "updates", "Check for updates…", true, None::<&str>)?,
-                &MenuItem::with_id(&app, "about", format!("WinTube {version}"), false, None::<&str>)?,
+                &MenuItem::with_id(&app, "about", format!("DeTube {version}"), false, None::<&str>)?,
             ],
         )
     };
@@ -449,7 +470,7 @@ fn main() {
             app.state::<Shared>().lock().unwrap().settings = load_settings(&handle);
 
             let window = WindowBuilder::new(app, "main")
-                .title("WinTube")
+                .title("DeTube")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(640.0, 420.0)
                 .build()?;
@@ -458,6 +479,7 @@ fn main() {
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(1280.0, TAB_BAR),
             )?;
+            fit_shell(&handle, TAB_BAR);
             let resize_handle = handle.clone();
             window.on_window_event(move |event| {
                 if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
@@ -468,5 +490,5 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running WinTube");
+        .expect("error while running DeTube");
 }

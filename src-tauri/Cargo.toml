@@ -1,5 +1,5 @@
 [package]
-name = "wintube"
+name = "detube"
 version = "0.0.0"
 description = "YouTube in its own window, with tabs and Shorts / AI-video filters"
 edition = "2021"
@@ -19,3 +19,7 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Linux: pin the tab bar's height (see fit_shell in main.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
