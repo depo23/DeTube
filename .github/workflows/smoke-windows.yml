@@ -1,0 +1,40 @@
+# TEMPORARY: inspect DeTube's page scripts on real Windows (WebView2) over DevTools.
+name: Windows page-script inspection
+
+on:
+  push:
+    branches: [fix/windows-page-scripts]
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build (debug)
+        working-directory: src-tauri
+        run: cargo build
+      - name: Run and inspect
+        shell: pwsh
+        run: |
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+          $p = Start-Process -FilePath src-tauri/target/debug/detube.exe -PassThru `
+                -RedirectStandardError detube-stderr.log -RedirectStandardOutput detube-stdout.log
+          Start-Sleep -Seconds 15
+          node .github/smoke/inspect.mjs
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          "---- stderr"; Get-Content detube-stderr.log -ErrorAction SilentlyContinue | Select-Object -First 60
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inspect
+          path: |
+            cdp-*.png
+            detube-*.log
