@@ -705,9 +705,13 @@ mod live_chat {
             let Some(webview) = tauri::Manager::get_webview(&app, &label) else { return };
             set_user_agent(&webview, Some(SAFARI));
             let url = serde_json::to_string(&url).unwrap();
+            // YouTube fills its chat frame with location.replace (the frame has no src), so the frame
+            // is found by where it sits. Only a tab that is blank or already chat (popped out) loads it whole.
             let _ = webview.eval(format!(
-                "(u => {{ const frames = [...document.querySelectorAll('iframe')].filter(f => f.src === u); \
-                 if (frames.length) frames.forEach(f => f.src = u); else location.href = u; }})({url})"
+                "(u => {{ const frames = [...document.querySelectorAll('iframe')] \
+                   .filter(f => f.src === u || f.closest('ytd-live-chat-frame')); \
+                 if (frames.length) frames.forEach(f => f.contentWindow.location.replace(u)); \
+                 else if (location.href === 'about:blank' || location.pathname.startsWith('/live_chat')) location.href = u; }})({url})"
             ));
         });
         true

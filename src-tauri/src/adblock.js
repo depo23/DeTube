@@ -57,7 +57,13 @@
   ];
   const style = document.createElement('style');
   style.textContent = HIDE.map(s => `${s} { display: none !important; }`).join('\n');
-  document.documentElement.appendChild(style);
+  // WebView2 (Windows) runs this before <html> exists.
+  if (document.documentElement) document.documentElement.appendChild(style);
+  else new MutationObserver((_, observer) => {
+    if (!document.documentElement) return;
+    observer.disconnect();
+    document.documentElement.appendChild(style);
+  }).observe(document, { childList: true });
 
   // 3. Any ad that still plays: mute it, press Skip as soon as it exists, and jump to its end.
   //    The wall above pauses the video; resume it once.
