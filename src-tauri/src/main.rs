@@ -116,6 +116,53 @@ fn devtools<R: tauri::Runtime>(builder: WebviewBuilder<R>) -> WebviewBuilder<R> 
     }
 }
 
+// TEMPORARY (inspection branch): with DETUBE_PROBE set, walks the first tab through a few
+// pages and prints what the page scripts did, for CI runs without DevTools (Linux).
+fn probe(app: &AppHandle) {
+    if std::env::var_os("DETUBE_PROBE").is_none() {
+        return;
+    }
+    const PROBE: &str = include_str!("../../.github/smoke/probe.js");
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let wait = |s| std::thread::sleep(std::time::Duration::from_secs(s));
+        let report = |app: &AppHandle, name: &'static str| {
+            if let Some(webview) = app.get_webview("tab1") {
+                let _ = webview.eval_with_callback(PROBE, move |result| eprintln!("[probe] {name} {result}"));
+            }
+        };
+        let go = |app: &AppHandle, url: &str| {
+            if let Some(webview) = app.get_webview("tab1") {
+                let _ = webview.navigate(Url::parse(url).unwrap());
+            }
+        };
+        wait(20);
+        report(&app, "home");
+        wait(2);
+        let mut settings = app.state::<Shared>().lock().unwrap().settings.clone();
+        settings.show_shorts = false;
+        settings.show_ai = false;
+        apply_settings(&app, settings);
+        go(&app, "https://www.youtube.com/results?search_query=funny+cats");
+        wait(15);
+        report(&app, "search-shorts-off");
+        wait(2);
+        go(&app, "https://www.youtube.com/results?search_query=vpn");
+        wait(15);
+        report(&app, "search-vpn");
+        wait(2);
+        go(&app, "https://www.youtube.com/watch?v=jNQXAC9IVRw");
+        wait(15);
+        report(&app, "watch");
+        wait(2);
+        go(&app, "https://www.youtube.com/@LofiGirl/live");
+        wait(30);
+        report(&app, "live");
+        wait(3);
+        eprintln!("[probe] done");
+    });
+}
+
 // ---------------------------------------------------------------- layout & tabs
 
 /// On Linux, child web views are stacked in the window's vertical box and ignore
@@ -317,6 +364,7 @@ fn unwrap_redirect(url: Url) -> Url {
 }
 
 fn open_in_browser(app: &AppHandle, url: &Url) {
+    eprintln!("[probe] opened in browser: {url}");
     let _ = app.opener().open_url(url.as_str(), None::<&str>);
 }
 
@@ -807,6 +855,7 @@ fn main() {
                 }
             });
             open_tab(&handle, Url::parse(HOME).unwrap())?;
+            probe(&handle);
             Ok(())
         })
         .run(tauri::generate_context!())
