@@ -24,7 +24,7 @@ jobs:
       - name: Run and inspect
         shell: pwsh
         run: |
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+          $env:DETUBE_DEVTOOLS = "1"
           $p = Start-Process -FilePath src-tauri/target/debug/detube.exe -PassThru `
                 -RedirectStandardError detube-stderr.log -RedirectStandardOutput detube-stdout.log
           Start-Sleep -Seconds 15

@@ -104,6 +104,18 @@ fn apply_settings(app: &AppHandle, mut settings: Settings) {
     }
 }
 
+// TEMPORARY (inspection branch): expose WebView2 DevTools when DETUBE_DEVTOOLS is set.
+// Every webview in the app must use the same browser arguments.
+fn devtools<R: tauri::Runtime>(builder: WebviewBuilder<R>) -> WebviewBuilder<R> {
+    if std::env::var_os("DETUBE_DEVTOOLS").is_some() {
+        builder.additional_browser_args(
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222",
+        )
+    } else {
+        builder
+    }
+}
+
 // ---------------------------------------------------------------- layout & tabs
 
 /// On Linux, child web views are stacked in the window's vertical box and ignore
@@ -179,7 +191,8 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
     );
     let (nav_app, nav_label, new_app, title_app) = (app.clone(), label.clone(), app.clone(), app.clone());
     // Starts blank: the page is loaded once the ad rules are in place, so the first page is covered too.
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(Url::parse("about:blank").unwrap()))
+    let builder = devtools(WebviewBuilder::new(&label, WebviewUrl::External(Url::parse("about:blank").unwrap()))
+    )
         .initialization_script(script)
         .initialization_script(ADBLOCK_JS)
         .on_navigation(move |url| !live_chat::restart_with_safari_agent(&nav_app, &nav_label, url) && allow_navigation(&nav_app, url))
@@ -782,7 +795,7 @@ fn main() {
                 .min_inner_size(640.0, 420.0)
                 .build()?;
             window.add_child(
-                WebviewBuilder::new("shell", WebviewUrl::App("index.html".into())),
+                devtools(WebviewBuilder::new("shell", WebviewUrl::App("index.html".into()))),
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(1280.0, TAB_BAR),
             )?;

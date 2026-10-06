@@ -1,6 +1,10 @@
 // TEMPORARY: inspects DeTube's YouTube tab over WebView2's DevTools protocol.
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const targets = await (await fetch('http://127.0.0.1:9222/json')).json();
+let targets = [];
+for (let i = 0; i < 30 && !targets.some(t => t.url.includes('youtube.com')); i++) {
+  try { targets = await (await fetch('http://127.0.0.1:9222/json')).json(); } catch (e) {}
+  await sleep(1000);
+}
 console.log('targets:', targets.map(t => `${t.type} ${t.url}`).join(' | '));
 const tab = targets.find(t => t.type === 'page' && t.url.includes('youtube.com'));
 if (!tab) { console.log('no YouTube target'); process.exit(0); }
