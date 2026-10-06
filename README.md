@@ -28,7 +28,7 @@
 - **Skip AI-generated videos.** Videos YouTube labels *Made with AI* are stopped before they play. Channels caught posting them disappear from your feed too, so it gets cleaner the more you watch. One click to watch anyway.
 - **No ads.** Video ads are removed before the player sees them, any that slip through are muted and skipped, and promoted videos and ad banners are hidden from your feed, search and watch pages.
 - **Live chat replay: fully working 😉** Live streams and past streams load their chat alongside the video, with no "your browser is out of date" message.
-- **Block channels.** Press **Block** under any video and that channel is gone: its videos vanish from your feed and search, and won't play unless you choose to. Edit the list anytime in **⚙ → Blocked channels…**.
+- **Block channels.** Press **Block** under any video and that channel is gone: its videos vanish from your feed and search, and won't play unless you choose **Watch anyway**. In **⚙ → Blocked channels…** you can also block a channel by pasting its @handle or link, edit an entry, or unblock it.
 - **Tabs.** Ctrl+T for a new tab, Ctrl+click a video to open it in one. Closing a tab stops its sound.
 - **Links go where they should.** Links in descriptions and comments open in your default browser.
 - **Always current.** A banner tells you when a new version is out.
@@ -62,6 +62,7 @@ If videos don't play on Linux, install your distribution's GStreamer codecs (on 
 
 - AI detection relies on YouTube's own *Made with AI* label. Videos their creators don't disclose — and YouTube doesn't catch — will still show up.
 - Changed your mind about a channel? **⚙ → Forget learned AI channels** resets the list.
+- Videos from blocked channels can still appear in the suggestions next to a video, because YouTube doesn't say which channel they're from there. They won't play if you open one.
 
 ## Build it yourself
 
