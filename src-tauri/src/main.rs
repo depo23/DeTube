@@ -104,65 +104,6 @@ fn apply_settings(app: &AppHandle, mut settings: Settings) {
     }
 }
 
-// TEMPORARY (inspection branch): expose WebView2 DevTools when DETUBE_DEVTOOLS is set.
-// Every webview in the app must use the same browser arguments.
-fn devtools<R: tauri::Runtime>(builder: WebviewBuilder<R>) -> WebviewBuilder<R> {
-    if std::env::var_os("DETUBE_DEVTOOLS").is_some() {
-        builder.additional_browser_args(
-            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222",
-        )
-    } else {
-        builder
-    }
-}
-
-// TEMPORARY (inspection branch): with DETUBE_PROBE set, walks the first tab through a few
-// pages and prints what the page scripts did, for CI runs without DevTools (Linux).
-fn probe(app: &AppHandle) {
-    if std::env::var_os("DETUBE_PROBE").is_none() {
-        return;
-    }
-    const PROBE: &str = include_str!("../../.github/smoke/probe.js");
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let wait = |s| std::thread::sleep(std::time::Duration::from_secs(s));
-        let report = |app: &AppHandle, name: &'static str| {
-            if let Some(webview) = app.get_webview("tab1") {
-                let _ = webview.eval_with_callback(PROBE, move |result| eprintln!("[probe] {name} {result}"));
-            }
-        };
-        let go = |app: &AppHandle, url: &str| {
-            if let Some(webview) = app.get_webview("tab1") {
-                let _ = webview.navigate(Url::parse(url).unwrap());
-            }
-        };
-        wait(20);
-        report(&app, "home");
-        wait(2);
-        let mut settings = app.state::<Shared>().lock().unwrap().settings.clone();
-        settings.show_shorts = false;
-        settings.show_ai = false;
-        apply_settings(&app, settings);
-        go(&app, "https://www.youtube.com/results?search_query=funny+cats");
-        wait(15);
-        report(&app, "search-shorts-off");
-        wait(2);
-        go(&app, "https://www.youtube.com/results?search_query=vpn");
-        wait(15);
-        report(&app, "search-vpn");
-        wait(2);
-        go(&app, "https://www.youtube.com/watch?v=jNQXAC9IVRw");
-        wait(15);
-        report(&app, "watch");
-        wait(2);
-        go(&app, "https://www.youtube.com/@LofiGirl/live");
-        wait(30);
-        report(&app, "live");
-        wait(3);
-        eprintln!("[probe] done");
-    });
-}
-
 // ---------------------------------------------------------------- layout & tabs
 
 /// On Linux, child web views are stacked in the window's vertical box and ignore
@@ -238,8 +179,7 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
     );
     let (nav_app, nav_label, new_app, title_app) = (app.clone(), label.clone(), app.clone(), app.clone());
     // Starts blank: the page is loaded once the ad rules are in place, so the first page is covered too.
-    let builder = devtools(WebviewBuilder::new(&label, WebviewUrl::External(Url::parse("about:blank").unwrap()))
-    )
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(Url::parse("about:blank").unwrap()))
         .initialization_script(script)
         .initialization_script(ADBLOCK_JS)
         .on_navigation(move |url| !live_chat::restart_with_safari_agent(&nav_app, &nav_label, url) && allow_navigation(&nav_app, url))
@@ -364,7 +304,6 @@ fn unwrap_redirect(url: Url) -> Url {
 }
 
 fn open_in_browser(app: &AppHandle, url: &Url) {
-    eprintln!("[probe] opened in browser: {url}");
     let _ = app.opener().open_url(url.as_str(), None::<&str>);
 }
 
@@ -847,7 +786,7 @@ fn main() {
                 .min_inner_size(640.0, 420.0)
                 .build()?;
             window.add_child(
-                devtools(WebviewBuilder::new("shell", WebviewUrl::App("index.html".into()))),
+                WebviewBuilder::new("shell", WebviewUrl::App("index.html".into())),
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(1280.0, TAB_BAR),
             )?;
@@ -859,7 +798,6 @@ fn main() {
                 }
             });
             open_tab(&handle, Url::parse(HOME).unwrap())?;
-            probe(&handle);
             Ok(())
         })
         .run(tauri::generate_context!())
