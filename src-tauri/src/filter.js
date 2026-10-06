@@ -19,6 +19,8 @@
     'ytd-compact-video-renderer:has(a[href^="/shorts/"])',
     'ytd-guide-entry-renderer:has(a[title="Shorts"])',
     'ytd-mini-guide-entry-renderer[aria-label="Shorts"]',
+    // Collapsed sidebar: the label moved onto the link, so match its target (any language).
+    'ytd-mini-guide-entry-renderer:has(a[href="/shorts/"])',
     'yt-tab-shape[tab-title="Shorts"]',
   ];
   const ITEMS = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model';
