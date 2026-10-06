@@ -192,11 +192,16 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
         .on_document_title_changed(move |webview, title| set_title(&title_app, webview.label(), title));
     #[cfg(target_os = "linux")]
     let builder = builder.on_page_load(|webview, payload| live_chat::on_page_load(&webview, &payload));
+    eprintln!("[startup] add_child {label} {:?}", std::time::Instant::now());
     let webview = window.add_child(builder, LogicalPosition::new(0.0, TAB_BAR), LogicalSize::new(1.0, 1.0))?;
     let loader = webview.clone();
+    eprintln!("[startup] install {:?}", std::time::Instant::now());
     ad_rules::install(app, &webview, move || {
-        let _ = loader.navigate(url);
+        eprintln!("[startup] navigate {url} {:?}", std::time::Instant::now());
+        let r = loader.navigate(url);
+        eprintln!("[startup] navigated {r:?} {:?}", std::time::Instant::now());
     });
+    eprintln!("[startup] install returned {:?}", std::time::Instant::now());
     {
         let state = app.state::<Shared>();
         let mut state = state.lock().unwrap();
@@ -205,6 +210,7 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
     }
     layout(app);
     emit_tabs(app);
+    eprintln!("[startup] open_tab done {:?}", std::time::Instant::now());
     Ok(())
 }
 
@@ -263,6 +269,7 @@ fn active_label(app: &AppHandle) -> String {
 }
 
 fn set_title(app: &AppHandle, label: &str, title: String) {
+    eprintln!("[title] {label} {title}");
     {
         let state = app.state::<Shared>();
         let mut state = state.lock().unwrap();
@@ -305,6 +312,7 @@ fn open_in_browser(app: &AppHandle, url: &Url) {
 
 /// Top-level navigations: links leaving YouTube open in the default browser instead.
 fn allow_navigation(app: &AppHandle, url: &Url) -> bool {
+    eprintln!("[nav] {url}");
     if matches!(url.scheme(), "about" | "data" | "blob" | "javascript") {
         return true;
     }
@@ -546,8 +554,10 @@ mod ad_rules {
         use windows_core::{Interface, HSTRING, PWSTR};
 
         let result = webview.with_webview(move |platform| unsafe {
+            eprintln!("[startup] with_webview closure {:?}", std::time::Instant::now());
             if let Ok(core) = platform.controller().CoreWebView2() {
                 let env = platform.environment();
+                eprintln!("[startup] core ok, 22: {}", core.cast::<ICoreWebView2_22>().is_ok());
                 let patterns = HOSTS.iter().map(|h| format!("*{h}/*")).chain(YOUTUBE_PATHS.iter().map(|p| format!("*youtube.com/{p}*")));
                 for pattern in patterns {
                     let filter = HSTRING::from(pattern);
@@ -566,15 +576,19 @@ mod ad_rules {
                     let Some(args) = args else { return Ok(()) };
                     let mut uri = PWSTR::null();
                     args.Request()?.Uri(&mut uri)?;
-                    if is_ad(&take_pwstr(uri)) {
+                    let uri = take_pwstr(uri);
+                    eprintln!("[request] {uri}");
+                    if is_ad(&uri) {
                         args.SetResponse(&env.CreateWebResourceResponse(None, 403, &HSTRING::from("Blocked"), &HSTRING::new())?)?;
                     }
                     Ok(())
                 }));
                 let mut token = 0;
-                let _ = core.add_WebResourceRequested(&handler, &mut token);
+                let r = core.add_WebResourceRequested(&handler, &mut token);
+                eprintln!("[startup] handler added {r:?} {:?}", std::time::Instant::now());
             }
             then();
+            eprintln!("[startup] then() returned {:?}", std::time::Instant::now());
         });
         if let Err(e) = result {
             eprintln!("DeTube: ad rules not installed: {e}");
@@ -789,7 +803,9 @@ fn main() {
                     layout(&resize_handle);
                 }
             });
+            eprintln!("[startup] setup: opening first tab {:?}", std::time::Instant::now());
             open_tab(&handle, Url::parse(HOME).unwrap())?;
+            eprintln!("[startup] setup done {:?}", std::time::Instant::now());
             Ok(())
         })
         .run(tauri::generate_context!())
