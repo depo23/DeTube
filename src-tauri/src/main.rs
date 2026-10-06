@@ -197,9 +197,13 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
     let loader = webview.clone();
     eprintln!("[startup] install {:?}", std::time::Instant::now());
     ad_rules::install(app, &webview, move || {
-        eprintln!("[startup] navigate {url} {:?}", std::time::Instant::now());
-        let r = loader.navigate(url);
-        eprintln!("[startup] navigated {r:?} {:?}", std::time::Instant::now());
+        // Not from inside the install callback: when it runs on the main thread, Tauri still
+        // holds this webview's handle there, and navigating would wait on it forever.
+        tauri::async_runtime::spawn(async move {
+            eprintln!("[startup] navigate {url} {:?}", std::time::Instant::now());
+            let r = loader.navigate(url);
+            eprintln!("[startup] navigated {r:?} {:?}", std::time::Instant::now());
+        });
     });
     eprintln!("[startup] install returned {:?}", std::time::Instant::now());
     {
