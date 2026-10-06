@@ -195,7 +195,11 @@ fn open_tab(app: &AppHandle, url: Url) -> tauri::Result<()> {
     let webview = window.add_child(builder, LogicalPosition::new(0.0, TAB_BAR), LogicalSize::new(1.0, 1.0))?;
     let loader = webview.clone();
     ad_rules::install(app, &webview, move || {
-        let _ = loader.navigate(url);
+        // Not from inside the install callback: when it runs on the main thread, Tauri still
+        // holds this webview's handle there, and navigating would wait on it forever.
+        tauri::async_runtime::spawn(async move {
+            let _ = loader.navigate(url);
+        });
     });
     {
         let state = app.state::<Shared>();
