@@ -24,7 +24,15 @@
   const ITEMS = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model';
   const KEY = 'mt2.aiChannels';
 
-  const root = document.documentElement;
+  // WebView2 (Windows) runs this before <html> exists; whatever needs it waits until it does.
+  function withRoot(fn) {
+    if (document.documentElement) return fn(document.documentElement);
+    new MutationObserver((_, observer) => {
+      if (!document.documentElement) return;
+      observer.disconnect();
+      fn(document.documentElement);
+    }).observe(document, { childList: true });
+  }
   // Settings come from the app: injected when the tab opened, then pushed with update(). The last
   // pushed values are also kept in this site's storage so a reloaded tab doesn't fall back to the
   // ones injected at tab creation; "rev" says which copy is newer.
@@ -69,11 +77,13 @@
     #mt2-block button { font: inherit; padding: 8px 18px; border: 0; border-radius: 18px; cursor: pointer;
       background: #fff; color: #0f0f0f; }
     #mt2-block button + button { background: #3f3f3f; color: #fff; }`;
-  root.appendChild(style);
+  withRoot(root => root.appendChild(style));
 
   function applyAttrs() {
-    root.toggleAttribute('mt2-hide-shorts', !settings.showShorts);
-    root.toggleAttribute('mt2-hide-ai', !settings.showAI);
+    withRoot(root => {
+      root.toggleAttribute('mt2-hide-shorts', !settings.showShorts);
+      root.toggleAttribute('mt2-hide-ai', !settings.showAI);
+    });
   }
 
   function videoId() {
@@ -128,7 +138,7 @@
       })
     );
     box.append(msg, actions);
-    root.appendChild(box);
+    document.documentElement.appendChild(box);
     document.querySelectorAll('video').forEach(v => v.pause());
   }
 
